@@ -715,12 +715,7 @@ class AltTextKeyView(
     }
 
     override fun shouldTriggerAltBySwipe(totalY: Int, fallback: SwipeSymbolDirection): Boolean {
-        if (totalY == 0) return false
-        return when (lastLayoutMode ?: resolveLayoutMode(appearanceView.height)) {
-            AltTextLayoutMode.Bottom -> totalY > 0
-            AltTextLayoutMode.TopRight, AltTextLayoutMode.TopCenter -> totalY < 0
-            AltTextLayoutMode.Hidden -> fallback.checkY(totalY)
-        }
+        return fallback.checkY(totalY)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -1029,12 +1024,7 @@ class ImageAltTextKeyView(
     }
 
     override fun shouldTriggerAltBySwipe(totalY: Int, fallback: SwipeSymbolDirection): Boolean {
-        if (totalY == 0) return false
-        return when (lastLayoutMode ?: resolveLayoutMode(appearanceView.height)) {
-            AltTextLayoutMode.Bottom -> totalY > 0
-            AltTextLayoutMode.TopRight, AltTextLayoutMode.TopCenter -> totalY < 0
-            AltTextLayoutMode.Hidden -> fallback.checkY(totalY)
-        }
+        return fallback.checkY(totalY)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
