@@ -187,10 +187,17 @@ class SettingsActivity : AppCompatActivity() {
             initializeServerProfileState()
             syncCredentialPreferencesForActiveProfile()
             findPreference<Preference>(QUICK_SYNC_KEY)?.setOnPreferenceChangeListener { _, newValue ->
-                if (newValue == false) {
-                    preferenceManager.sharedPreferences?.edit()
+                val enabled = newValue == true
+                val prefs = preferenceManager.sharedPreferences
+                if (!enabled) {
+                    prefs?.edit()
                         ?.putBoolean(QUICK_SYNC_UNREACHABLE_KEY, false)
+                        ?.putBoolean("ime_sync_active", false)
                         ?.apply()
+                    context?.let { MainService.stopSyncService(it) }
+                } else {
+                    prefs?.edit()?.putBoolean("ime_sync_active", true)?.apply()
+                    context?.let { MainService.startSyncService(it, "settings-enabled", imeSyncActive = true) }
                 }
                 true
             }
