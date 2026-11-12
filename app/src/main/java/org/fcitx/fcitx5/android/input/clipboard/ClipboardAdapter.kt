@@ -9,6 +9,7 @@ import android.graphics.BitmapFactory
 import android.content.Context
 import android.net.Uri
 import android.os.Build
+import android.provider.DocumentsContract
 import android.util.LruCache
 import android.util.Patterns
 import android.view.ViewGroup
@@ -33,7 +34,6 @@ import org.fcitx.fcitx5.android.utils.queryFileName
 import splitties.resources.styledColor
 import timber.log.Timber
 import kotlin.math.min
-import android.provider.DocumentsContract
 
 abstract class ClipboardAdapter(
     private val theme: Theme,
@@ -142,14 +142,18 @@ abstract class ClipboardAdapter(
                 }
             }
             root.setOnClickListener {
-                showEntryMenu(
-                    anchor = root,
-                    entry = entry,
-                    linkUri = linkUri,
-                    searchQuery = searchQuery,
-                    dialNumber = dialNumber,
-                    splittableText = splittableText
-                )
+                if (entry.isUriEntry()) {
+                    showEntryMenu(
+                        anchor = root,
+                        entry = entry,
+                        linkUri = linkUri,
+                        searchQuery = searchQuery,
+                        dialNumber = dialNumber,
+                        splittableText = splittableText
+                    )
+                } else {
+                    onPaste(entry)
+                }
             }
             root.setOnLongClickListener {
                 showEntryMenu(
@@ -179,11 +183,6 @@ abstract class ClipboardAdapter(
         val isUriEntry = entry.isUriEntry()
         val imageUri = entry.viewableImageUri()
 
-        if (!isUriEntry) {
-            menu.item(android.R.string.paste, iconTint = iconTint) {
-                onPaste(entry)
-            }
-        }
         if (entry.pinned) {
             menu.item(R.string.unpin, R.drawable.ic_outline_push_pin_24, iconTint) {
                 onUnpin(entry.id)
