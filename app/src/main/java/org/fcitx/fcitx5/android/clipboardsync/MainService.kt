@@ -54,6 +54,7 @@ import org.fcitx.fcitx5.android.clipboardsync.network.SyncClient.ServerBackend
 import org.fcitx.fcitx5.android.clipboardsync.service.QuickSyncTileService
 import org.fcitx.fcitx5.android.clipboardsync.ui.ClipboardCaptureActivity
 import org.fcitx.fcitx5.android.clipboardsync.ui.StoragePathUtils
+import org.fcitx.fcitx5.android.utils.userManager
 import java.io.IOException
 import java.util.Locale
 
@@ -120,8 +121,23 @@ class MainService : FcitxPluginService() {
         private const val RECENT_UPLOADED_FILE_TTL_MS = 10 * 60 * 1000L
         private const val MAX_SUPPRESSED_REMOTE_ITEMS = 256
 
+        private fun isCredentialStorageUnlocked(context: Context): Boolean {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return true
+            return context.userManager.isUserUnlocked
+        }
+
+        private fun defaultSharedPreferencesOrNull(context: Context): SharedPreferences? {
+            return try {
+                PreferenceManager.getDefaultSharedPreferences(context)
+            } catch (e: IllegalStateException) {
+                Log.i(TAG, "Skip accessing shared preferences: ${e.message}")
+                null
+            }
+        }
+
         fun shouldAutoStart(context: Context): Boolean {
-            val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+            if (!isCredentialStorageUnlocked(context)) return false
+            val prefs = defaultSharedPreferencesOrNull(context) ?: return false
             return prefs.getBoolean(PREF_QUICK_SYNC, DEFAULT_QUICK_SYNC_ENABLED)
         }
 
@@ -131,7 +147,11 @@ class MainService : FcitxPluginService() {
             forceEnableSync: Boolean = false,
             imeSyncActive: Boolean = false
         ) {
-            val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+            if (!isCredentialStorageUnlocked(context)) {
+                Log.i(TAG, "Skip startSyncService($reason): user storage is still locked")
+                return
+            }
+            val prefs = defaultSharedPreferencesOrNull(context) ?: return
             if (!forceEnableSync && !prefs.getBoolean(PREF_QUICK_SYNC, DEFAULT_QUICK_SYNC_ENABLED)) {
                 return
             }
@@ -149,10 +169,18 @@ class MainService : FcitxPluginService() {
         }
 
         fun stopSyncService(context: Context) {
-            PreferenceManager.getDefaultSharedPreferences(context)
+            if (!isCredentialStorageUnlocked(context)) return
+            val prefs = defaultSharedPreferencesOrNull(context) ?: return
+            prefs
                 .edit()
                 .putBoolean(PREF_IME_SYNC_ACTIVE, false)
                 .apply()
+            if (prefs.getBoolean(PREF_QUICK_SYNC, DEFAULT_QUICK_SYNC_ENABLED)) {
+                // Quick sync is still enabled: keep the service alive but let it pause
+                // its sync loops (ime_sync_active is now false) instead of killing it.
+                startSyncService(context, "ime-stop-refresh")
+                return
+            }
             runCatching {
                 context.stopService(Intent(context, MainService::class.java))
             }
@@ -401,7 +429,7 @@ class MainService : FcitxPluginService() {
             key == SyncFilterPrefs.PREF_FILTER_MAX_TEXT_CHARS
         ) {
             Log.d(TAG, "Receive filter changed: $key")
-        } else if (key == PREF_QUICK_SYNC || key == PREF_SYNC_INTERVAL) {
+        } else if (key == PREF_QUICK_SYNC || key == PREF_SYNC_INTERVAL || key == PREF_IME_SYNC_ACTIVE) {
             Log.d(TAG, "Preference changed: $key, restarting sync")
             updateForegroundState()
             refreshSyncRuntime()
@@ -538,11 +566,7 @@ class MainService : FcitxPluginService() {
                 }
                 val endpoint = currentEndpoint()
                 try {
-                    val safeInterval = runCatching {
-                        prefs.getInt(PREF_SYNC_INTERVAL, 3).toLong()
-                    }.getOrElse {
-                        prefs.getString(PREF_SYNC_INTERVAL, "3")?.toLongOrNull() ?: 3L
-                    }.coerceIn(1, 60)
+                    val safeInterval = prefs.syncIntervalSeconds()
 
                     checkRemoteClipboard()
                     resetFailureState()
@@ -1498,6 +1522,27 @@ class MainService : FcitxPluginService() {
         val quickSyncEnabled = prefs.getBoolean(PREF_QUICK_SYNC, DEFAULT_QUICK_SYNC_ENABLED)
         val imeSyncActive = prefs.getBoolean(PREF_IME_SYNC_ACTIVE, false)
         return quickSyncEnabled && imeSyncActive && isScreenInteractive()
+    }
+
+    /**
+     * Reads the polling interval regardless of whether an older build stored it as a
+     * String or a newer one stored it as an Int. Falls back to 3 seconds and clamps to
+     * the 1..60 window used by the settings UI.
+     */
+    private fun SharedPreferences.syncIntervalSeconds(): Long {
+        val raw: Long = try {
+            val value = all[PREF_SYNC_INTERVAL]
+            when (value) {
+                is Int -> value.toLong()
+                is Long -> value
+                is String -> value.toLongOrNull() ?: 3L
+                else -> 3L
+            }
+        } catch (e: ClassCastException) {
+            Log.w(TAG, "Unexpected $PREF_SYNC_INTERVAL type, falling back to 3s", e)
+            3L
+        }
+        return raw.coerceIn(1L, 60L)
     }
 
     private fun isScreenInteractive(): Boolean {
