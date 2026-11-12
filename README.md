@@ -2,6 +2,11 @@
 
 [Fcitx5](https://github.com/fcitx/fcitx5) input method framework and engines ported to Android.
 
+## What's in this fork?
+
+本fork在原有的fcitx5-android基础上，
+仅新引入了内置的剪贴板同步与辅助码浅色标记。
+
 ## Download
 
 [<img src="https://github.com/rubenpgrady/get-it-on-github/raw/refs/heads/main/get-it-on-github.png" alt="Git it on GitHub" width="207" height="80">](https://github.com/fcitx5-android/fcitx5-android/releases/latest)
