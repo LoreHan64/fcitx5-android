@@ -114,6 +114,8 @@ abstract class ClipboardAdapter(
         ViewHolder(ClipboardEntryUi(parent.context, theme, entryRadius))
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+        holder.entryUi.root.cancelGestures()
+        holder.entryUi.root.isPressed = false
         val entry = getItem(position) ?: return
         with(holder.entryUi) {
             val displayText = if (entry.isUriEntry()) {
@@ -249,6 +251,9 @@ abstract class ClipboardAdapter(
     }
 
     override fun onViewRecycled(holder: ViewHolder) {
+        holder.entryUi.root.cancelGestures()
+        holder.entryUi.root.isPressed = false
+        holder.entryUi.root.jumpDrawablesToCurrentState()
         holder.thumbnailJob?.cancel()
         holder.thumbnailJob = null
         holder.boundThumbnailKey = null

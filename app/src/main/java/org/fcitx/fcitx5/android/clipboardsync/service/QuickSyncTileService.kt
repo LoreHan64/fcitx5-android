@@ -9,6 +9,7 @@ import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import androidx.preference.PreferenceManager
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.clipboardsync.MainService
 
 @SuppressLint("NewApi")
 class QuickSyncTileService : TileService() {
@@ -44,6 +45,16 @@ class QuickSyncTileService : TileService() {
             .putBoolean(PREF_QUICK_SYNC, newValue)
             .putBoolean(PREF_QUICK_SYNC_UNREACHABLE, false)
             .apply()
+        if (newValue) {
+            MainService.startSyncService(
+                this,
+                "quick-settings-tile",
+                forceEnableSync = true,
+                imeSyncActive = true
+            )
+        } else {
+            MainService.stopSyncService(this)
+        }
         refreshTile()
     }
 
