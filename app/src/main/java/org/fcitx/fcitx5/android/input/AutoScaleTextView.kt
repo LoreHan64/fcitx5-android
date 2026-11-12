@@ -9,6 +9,9 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
+import android.text.Spanned
+import android.text.TextPaint
+import android.text.style.CharacterStyle
 import android.util.AttributeSet
 import android.view.Gravity
 import android.widget.TextView
@@ -188,13 +191,39 @@ class AutoScaleTextView @JvmOverloads constructor(
             calculateTransform(width, height)
             needsCalculateTransform = false
         }
-        val paint = paint
-        paint.color = currentTextColor
+        val textPaint = paint
         canvas.withSave {
             translate(scrollX.toFloat(), scrollY.toFloat())
             translate(baselineX, baselineY)
             scale(textScaleX, textScaleY)
-            drawText(text.toString(), 0.0f, 0.0f, paint)
+            drawTextWithSpans(canvas, textPaint)
+        }
+    }
+
+    /** Draw styled text in runs so candidate comment color spans are preserved. */
+    private fun drawTextWithSpans(canvas: Canvas, paint: Paint) {
+        val content = text
+        val plainText = content.toString()
+        val spanned = content as? Spanned
+        if (spanned == null) {
+            paint.color = currentTextColor
+            canvas.drawText(plainText, 0f, 0f, paint)
+            return
+        }
+
+        val length = plainText.length
+        var start = 0
+        var x = 0f
+        while (start < length) {
+            val end = spanned.nextSpanTransition(start, length, CharacterStyle::class.java)
+            if (end <= start) break
+            val runPaint = TextPaint(paint).apply { color = currentTextColor }
+            spanned.getSpans(start, end, CharacterStyle::class.java).forEach { span ->
+                span.updateDrawState(runPaint)
+            }
+            canvas.drawText(plainText, start, end, x, 0f, runPaint)
+            x += runPaint.measureText(plainText, start, end)
+            start = end
         }
     }
 
