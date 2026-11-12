@@ -76,15 +76,9 @@ class ClipboardEntryUi(override val ctx: Context, private val theme: Theme, radi
     }
 
     val layout = constraintLayout {
-        add(preview, lParams(matchParent, dp(72)) {
-            topOfParent(dp(6))
-        })
-        add(imagePlaceholder, lParams(matchParent, dp(72)) {
-            topOfParent(dp(6))
-        })
-        add(textView, lParams(matchParent, wrapContent) {
-            topOfParent(dp(8))
-        })
+        add(preview, lParams(matchParent, dp(72)))
+        add(imagePlaceholder, lParams(matchParent, dp(72)))
+        add(textView, lParams(matchParent, wrapContent))
         add(pin, lParams(dp(12), dp(12)) {
             bottomOfParent(dp(2))
             endOfParent(dp(2))
