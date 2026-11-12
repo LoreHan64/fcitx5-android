@@ -374,17 +374,15 @@ class MainService : FcitxPluginService() {
     }
 
     override fun onDestroy() {
-        unregisterClipboardListenerIfNeeded()
-        unregisterPrefsListenerIfNeeded()
-        unregisterNetworkCallbackIfNeeded()
-        unregisterScreenStateReceiverIfNeeded()
-        stopPeriodicSync()
-        stopHealthMonitor()
-        stopForegroundState()
-        connectionSessionId += 1
-        connection = null
+        // Keep teardown identical to the plugin-service lifecycle: unregister the
+        // clipboard transformer and unbind the Fcitx IPC connection before destruction.
+        if (serviceRunning) {
+            stop()
+        } else {
+            connectionSessionId += 1
+            connection = null
+        }
         scope.cancel()
-        serviceRunning = false
         selfStarted = false
         super.onDestroy()
     }
@@ -1499,7 +1497,7 @@ class MainService : FcitxPluginService() {
     private fun shouldRunSyncLoops(): Boolean {
         val quickSyncEnabled = prefs.getBoolean(PREF_QUICK_SYNC, DEFAULT_QUICK_SYNC_ENABLED)
         val imeSyncActive = prefs.getBoolean(PREF_IME_SYNC_ACTIVE, false)
-        return quickSyncEnabled && (imeSyncActive || selfStarted) && isScreenInteractive()
+        return quickSyncEnabled && imeSyncActive && isScreenInteractive()
     }
 
     private fun isScreenInteractive(): Boolean {

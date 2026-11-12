@@ -197,7 +197,16 @@ class SettingsActivity : AppCompatActivity() {
                     context?.let { MainService.stopSyncService(it) }
                 } else {
                     prefs?.edit()?.putBoolean("ime_sync_active", true)?.apply()
-                    context?.let { MainService.startSyncService(it, "settings-enabled", imeSyncActive = true) }
+                    // Preference callbacks run before SwitchPreferenceCompat commits the new value.
+                    // Force-enable so the service is not rejected while quick_sync is still false.
+                    context?.let {
+                        MainService.startSyncService(
+                            it,
+                            "settings-enabled",
+                            forceEnableSync = true,
+                            imeSyncActive = true
+                        )
+                    }
                 }
                 true
             }
