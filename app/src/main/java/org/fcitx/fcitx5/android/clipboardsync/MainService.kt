@@ -47,6 +47,7 @@ import org.fcitx.fcitx5.android.clipboardsync.ui.ClipboardSyncSettingsActivity
 import org.fcitx.fcitx5.android.clipboardsync.network.ClipCascadeClient
 import org.fcitx.fcitx5.android.clipboardsync.network.ClipCascadeClipboardData
 import org.fcitx.fcitx5.android.clipboardsync.network.ClipboardData
+import org.fcitx.fcitx5.android.clipboardsync.network.HashUtils
 import org.fcitx.fcitx5.android.clipboardsync.network.OneClipEventClient
 import org.fcitx.fcitx5.android.clipboardsync.network.SyncClient
 import org.fcitx.fcitx5.android.clipboardsync.network.SyncClient.ServerBackend
