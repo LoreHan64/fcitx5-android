@@ -46,8 +46,8 @@ class CandidateItemUi(override val ctx: Context, val theme: Theme) : Ui {
 
     fun updateCandidate(candidate: CandidateWord) {
         val fg = theme.candidateTextColor
-        // Use the theme's secondary text tone to distinguish auxiliary codes from candidate text.
-        val altFg = theme.altKeyTextColor
+        // Use the secondary text tone to distinguish auxiliary codes from candidate text.
+        val altFg = theme.candidateCommentColor
         text.text = buildSpannedString {
             color(fg) {
                 append(candidate.text)
