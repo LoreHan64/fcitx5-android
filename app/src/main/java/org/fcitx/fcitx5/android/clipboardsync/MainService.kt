@@ -165,7 +165,8 @@ class MainService : FcitxPluginService() {
             }
             // Clipboard sync is hosted alongside the input method and must not
             // promote itself to a foreground service or show a persistent notification.
-            context.startService(intent)
+            runCatching { context.startService(intent) }
+                .onFailure { Log.w(TAG, "startSyncService($reason) rejected by the system", it) }
         }
 
         fun stopSyncService(context: Context) {
