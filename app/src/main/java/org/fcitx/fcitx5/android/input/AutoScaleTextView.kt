@@ -9,6 +9,8 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.util.AttributeSet
 import android.view.Gravity
 import android.widget.TextView
@@ -189,12 +191,40 @@ class AutoScaleTextView @JvmOverloads constructor(
             needsCalculateTransform = false
         }
         val paint = paint
-        paint.color = currentTextColor
+        val content = text
         canvas.withSave {
             translate(scrollX.toFloat(), scrollY.toFloat())
             translate(baselineX, baselineY)
             scale(textScaleX, textScaleY)
-            drawText(text.toString(), 0.0f, 0.0f, paint)
+            if (content is Spanned) {
+                // Drawing text.toString() drops TextView spans (including candidate auxiliary-code
+                // colors), so render each foreground-color run with its own color.
+                val colorSpans = content.getSpans(0, content.length, ForegroundColorSpan::class.java)
+                val boundaries = sortedSetOf(0, content.length)
+                colorSpans.forEach { span ->
+                    val start = content.getSpanStart(span)
+                    val end = content.getSpanEnd(span)
+                    if (start >= 0 && end > start) {
+                        boundaries.add(start)
+                        boundaries.add(end)
+                    }
+                }
+                val points = boundaries.toList()
+                for (i in 0 until points.lastIndex) {
+                    val start = points[i]
+                    val end = points[i + 1]
+                    if (start == end) continue
+                    val colorSpan = colorSpans.lastOrNull {
+                        content.getSpanStart(it) <= start && content.getSpanEnd(it) >= end
+                    }
+                    paint.color = colorSpan?.foregroundColor ?: currentTextColor
+                    val segment = content.subSequence(start, end).toString()
+                    drawText(segment, baselineX + 0f, baselineY + 0f, paint)
+                }
+            } else {
+                paint.color = currentTextColor
+                drawText(content.toString(), 0.0f, 0.0f, paint)
+            }
         }
     }
 
