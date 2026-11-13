@@ -76,7 +76,8 @@ class FcitxRemoteService : Service() {
             originalRootUri: String,
             type: String,
             timestamp: Long,
-            sensitive: Boolean
+            sensitive: Boolean,
+            notifyListeners: Boolean
         ) {
             val filteredText = org.fcitx.fcitx5.android.data.clipboard.HostClipboardFilter.transform(text)
             runBlocking {
@@ -91,7 +92,22 @@ class FcitxRemoteService : Service() {
                     type = type,
                     timestamp = timestamp,
                     sensitive = sensitive,
-                    notifyListeners = false
+                    /*
+                     * Remote imports used to always land in the database silently, so
+                     * ClipboardManager.lastEntry kept pointing at the last *local* copy. The
+                     * candidate bar therefore never got a hint, and the replay on IME re-show
+                     * replayed stale content (or nothing at all, once the entry sat past the
+                     * clipboardItemTimeout gate). The only hint that ever appeared was a side
+                     * effect of the system clipboard echo after setPrimaryClip; whether it showed
+                     * up depended on timing.
+                     *
+                     * The caller now decides whether this particular entry should notify, so a
+                     * bulk history backfill still stays quiet except for its newest entry.
+                     * Neither listener writes back to the system clipboard (KawaiiBarComponent
+                     * only updates its own UI, Fcitx.onClipboardUpdate only forwards to the
+                     * engine), so this cannot create an upload loop.
+                     */
+                    notifyListeners = notifyListeners
                 )
             }
         }

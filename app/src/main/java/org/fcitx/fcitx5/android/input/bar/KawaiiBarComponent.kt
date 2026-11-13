@@ -420,9 +420,18 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
 
     override fun onScopeSetupFinished(scope: DynamicScope) {
         ClipboardManager.lastEntry?.let {
+            /*
+             * Remote entries carry the timestamp of the *other* device, so this subtraction mixes
+             * two clocks. A peer running even slightly ahead yields a negative age, which the old
+             * comparison treated as fresh by luck, and a peer running behind by more than
+             * clipboardItemTimeout silently swallowed the hint on every IME re-show. Clamp the age
+             * at zero: an entry from the future is certainly recent, and only entries that are
+             * genuinely stale by local reckoning should be dropped.
+             */
             val now = System.currentTimeMillis()
             val clipboardTimeout = clipboardItemTimeout.getValue() * 1000L
-            if (now - it.timestamp < clipboardTimeout) {
+            val age = (now - it.timestamp).coerceAtLeast(0L)
+            if (age < clipboardTimeout) {
                 onClipboardUpdateListener.onUpdate(it)
             }
         }
