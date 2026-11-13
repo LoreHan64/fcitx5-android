@@ -24,7 +24,8 @@ interface IFcitxRemoteService {
        String originalRootUri,
        String type,
        long timestamp,
-       boolean sensitive
+       boolean sensitive,
+       boolean notifyListeners
     );
 
 

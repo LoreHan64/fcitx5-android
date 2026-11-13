@@ -230,6 +230,8 @@ class MainService : FcitxPluginService() {
     private lateinit var prefs: SharedPreferences
     private var connection: FcitxRemoteConnection? = null
     private var syncJob: Job? = null
+    private var activeSyncLoopSignature: String? = null
+    private var lastLoggedPollIntervalSeconds: Long? = null
     private var healthMonitorJob: Job? = null
     private var networkReconnectJob: Job? = null
     private var scope = createScope()
@@ -492,7 +494,7 @@ class MainService : FcitxPluginService() {
                 if (backend == ServerBackend.SYNCCLIPBOARD) {
                     if (syncJob?.isActive != true) {
                         Log.w(TAG, "[Health] Polling loop is inactive, restarting")
-                        startPeriodicSync()
+                        startPeriodicSync(force = true)
                     }
                     continue
                 }
@@ -504,7 +506,7 @@ class MainService : FcitxPluginService() {
                 }
                 if (!connected || syncJob?.isActive != true) {
                     Log.w(TAG, "[Health] Event stream is disconnected, restarting $backend")
-                    startPeriodicSync()
+                    startPeriodicSync(force = true)
                     continue
                 }
 
@@ -523,7 +525,7 @@ class MainService : FcitxPluginService() {
 
                 if (now - lastBackendActivityAt >= currentStaleReconnectDelayMs()) {
                     Log.w(TAG, "[Health] Backend stream appears stale, forcing reconnect for $backend")
-                    startPeriodicSync()
+                    startPeriodicSync(force = true)
                 }
             }
         }
@@ -534,8 +536,26 @@ class MainService : FcitxPluginService() {
         healthMonitorJob = null
     }
 
-    private fun startPeriodicSync() {
+    private fun startPeriodicSync(force: Boolean = false) {
+        /*
+         * refreshSyncRuntime() can run twice for one preference change: once from the prefs
+         * listener and once from the start() re-entry via ensureSelfStarted(). The second call
+         * used to cancel and relaunch the loop, but cancellation is cooperative, so the in-flight
+         * checkRemoteClipboard() still completed and we observed two identical
+         * "[Pull] Processed data" lines a few hundred ms apart. Skip the restart when nothing
+         * that affects the loop has changed.
+         *
+         * Callers that are recovering a broken connection (health monitor, scheduleReconnect)
+         * pass force = true, because there the loop may be "active" yet already dead on the wire.
+         */
+        val signature = buildSyncLoopSignature()
+        if (!force && syncJob?.isActive == true && signature == activeSyncLoopSignature) {
+            Log.d(TAG, "[Pull] Sync loop already running with unchanged configuration, skip restart")
+            return
+        }
+
         stopPeriodicSync()
+        activeSyncLoopSignature = signature
 
         if (!shouldRunSyncLoops()) {
             Log.d(TAG, "[Pull] Sync loops paused by runtime state (quick-sync off or screen not interactive)")
@@ -568,12 +588,21 @@ class MainService : FcitxPluginService() {
                 val endpoint = currentEndpoint()
                 try {
                     val safeInterval = prefs.syncIntervalSeconds()
+                    val effectiveInterval = currentPollingIntervalSeconds(safeInterval)
+                    if (effectiveInterval != lastLoggedPollIntervalSeconds) {
+                        lastLoggedPollIntervalSeconds = effectiveInterval
+                        Log.d(
+                            TAG,
+                            "[Pull] Effective poll interval ${effectiveInterval}s " +
+                                "(configured ${safeInterval}s, mode=${currentRuntimeMode()})"
+                        )
+                    }
 
                     checkRemoteClipboard()
                     resetFailureState()
                     flushPendingUploads("poll-loop")
 
-                    delay(currentPollingIntervalSeconds(safeInterval) * 1000L)
+                    delay(effectiveInterval * 1000L)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -587,9 +616,14 @@ class MainService : FcitxPluginService() {
         }
     }
 
+    private fun buildSyncLoopSignature(): String {
+        return "${currentEndpoint().identity}|${prefs.syncIntervalSeconds()}"
+    }
+
     private fun stopPeriodicSync() {
         syncJob?.cancel()
         syncJob = null
+        activeSyncLoopSignature = null
         networkReconnectJob?.cancel()
         networkReconnectJob = null
         disconnectClipCascadeClient()
@@ -792,16 +826,29 @@ class MainService : FcitxPluginService() {
                 return
             }
 
+            /*
+             * Only the newest entry that actually gets imported should surface as a clipboard
+             * hint. A first-time pairing backfills up to SYNCCLIPBOARD_HISTORY_PAGE_SIZE records
+             * at once, and notifying for every one of them would fire a burst of candidate-bar
+             * updates and engine setClipboard() calls just to end up showing the same final item.
+             * Pick the last non-echo entry, since the true last element may be skipped below.
+             */
+            val notifyIndex = acceptedItems.indexOfLast {
+                !shouldSkipRemoteImportForLocalEcho(it, it.text)
+            }
+
             var importedAll = true
-            acceptedItems.forEach { data ->
+            acceptedItems.forEachIndexed { index, data ->
                 val remoteText = data.text
                 Log.d(TAG, "[Pull] Processed data: type=${data.type}, text=$remoteText")
                 acknowledgePendingUploads(remoteText)
                 if (shouldSkipRemoteImportForLocalEcho(data, remoteText)) {
                     Log.d(TAG, "[Pull] Skipping echoed local clipboard item in remote history")
-                    return@forEach
+                    return@forEachIndexed
                 }
-                importedAll = importRemoteClipboardEntry(data, downloadUri) && importedAll
+                importedAll = importRemoteClipboardEntry(
+                    data, downloadUri, notifyListeners = index == notifyIndex
+                ) && importedAll
             }
 
             if (endpoint.backend == ServerBackend.SYNCCLIPBOARD && !importedAll) {
@@ -841,7 +888,11 @@ class MainService : FcitxPluginService() {
         }
     }
 
-    private fun importRemoteClipboardEntry(data: ClipboardData, downloadUri: Uri?): Boolean {
+    private fun importRemoteClipboardEntry(
+        data: ClipboardData,
+        downloadUri: Uri?,
+        notifyListeners: Boolean
+    ): Boolean {
         val remoteService = connection?.remoteService ?: return false
         val remoteText = data.text.takeIf { it.isNotBlank() } ?: return false
         grantRemoteClipboardPermissions(remoteText, downloadUri)
@@ -852,7 +903,8 @@ class MainService : FcitxPluginService() {
                 downloadUri?.toString().orEmpty(),
                 importedClipboardMimeType(data),
                 data.remoteTimestamp.takeIf { it > 0L } ?: System.currentTimeMillis(),
-                false
+                false,
+                notifyListeners
             )
         }.onFailure { error ->
             Log.w(TAG, "[Pull] Failed to import remote clipboard entry into Fcitx history", error)
@@ -1272,7 +1324,7 @@ class MainService : FcitxPluginService() {
                 delay(NETWORK_RECONNECT_DEBOUNCE_MS)
             }
             Log.d(TAG, "[Reconnect] Restarting sync runtime: $reason")
-            startPeriodicSync()
+            startPeriodicSync(force = true)
             startHealthMonitor()
         }
     }
@@ -1571,7 +1623,15 @@ class MainService : FcitxPluginService() {
         return when (currentRuntimeMode()) {
             RuntimeMode.NORMAL -> baseIntervalSeconds
             RuntimeMode.SCREEN_OFF -> maxOf(baseIntervalSeconds, SCREEN_OFF_POLL_INTERVAL_SECONDS)
-            RuntimeMode.POWER_SAVE -> maxOf(baseIntervalSeconds, POWER_SAVE_POLL_INTERVAL_SECONDS)
+            /*
+             * Power saver used to throttle polling even while the screen was on. That silently
+             * turned a 1s setting into 30s and made remote clipboard arrival feel broken, with no
+             * real battery gain while the user is actively looking at the IME. Only throttle once
+             * the screen is off, which is where the savings actually are.
+             */
+            RuntimeMode.POWER_SAVE ->
+                if (isScreenInteractive()) baseIntervalSeconds
+                else maxOf(baseIntervalSeconds, POWER_SAVE_POLL_INTERVAL_SECONDS)
             RuntimeMode.AGGRESSIVE -> maxOf(baseIntervalSeconds, AGGRESSIVE_POLL_INTERVAL_SECONDS)
         }
     }
