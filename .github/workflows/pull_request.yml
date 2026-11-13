@@ -39,36 +39,66 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
 
-      - name: Build Release APK
-        run: ./gradlew :app:assembleRelease
+      - name: Build Debug APKs
+        run: ./gradlew :app:assembleDebug
 
       - name: List generated APKs
-        run: find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print
+        run: find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print
+
+      # `upload-artifact` with `archive: false` takes the artifact name from the
+      # uploaded file and ignores its `name` input, so the APKs are first staged
+      # under the exact `app-<abi>-debug.apk` names.
+      - name: Stage APKs as app-<abi>-debug.apk
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          src=app/build/outputs/apk/debug
+          out=app/build/outputs/apk/debug/artifacts
+          mkdir -p "$out"
+          for abi in armeabi-v7a arm64-v8a x86 x86_64; do
+            case "$abi" in
+              armeabi-v7a) pattern='*armeabi-v7a*.apk' ;;
+              arm64-v8a)   pattern='*arm64-v8a*.apk' ;;
+              x86)         pattern='*x86-*.apk' ;;
+              x86_64)      pattern='*x86_64*.apk' ;;
+            esac
+            matches=("$src"/$pattern)
+            if [ "${#matches[@]}" -ne 1 ]; then
+              echo "::error::expected exactly 1 APK for $abi, found ${#matches[@]}: ${matches[*]}"
+              exit 1
+            fi
+            cp -f "${matches[0]}" "$out/app-$abi-debug.apk"
+          done
+          ls -l "$out"
 
       - name: Upload armeabi-v7a APK
         uses: actions/upload-artifact@v7
         with:
-          name: app-armeabi-v7a-release
-          path: app/build/outputs/apk/release/*armeabi-v7a*.apk
+          name: app-armeabi-v7a-debug.apk
+          path: app/build/outputs/apk/debug/artifacts/app-armeabi-v7a-debug.apk
+          archive: false
           if-no-files-found: error
 
       - name: Upload arm64-v8a APK
         uses: actions/upload-artifact@v7
         with:
-          name: app-arm64-v8a-release
-          path: app/build/outputs/apk/release/*arm64-v8a*.apk
+          name: app-arm64-v8a-debug.apk
+          path: app/build/outputs/apk/debug/artifacts/app-arm64-v8a-debug.apk
+          archive: false
           if-no-files-found: error
 
       - name: Upload x86 APK
         uses: actions/upload-artifact@v7
         with:
-          name: app-x86-release
-          path: app/build/outputs/apk/release/*x86-*.apk
+          name: app-x86-debug.apk
+          path: app/build/outputs/apk/debug/artifacts/app-x86-debug.apk
+          archive: false
           if-no-files-found: error
 
       - name: Upload x86_64 APK
         uses: actions/upload-artifact@v7
         with:
-          name: app-x86_64-release
-          path: app/build/outputs/apk/release/*x86_64*.apk
+          name: app-x86_64-debug.apk
+          path: app/build/outputs/apk/debug/artifacts/app-x86_64-debug.apk
+          archive: false
           if-no-files-found: error

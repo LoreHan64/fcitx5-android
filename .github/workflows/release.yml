@@ -7,16 +7,24 @@ on:
         description: 'Version tag for the release (e.g. v1.0.0)'
         required: true
         type: string
-      abi:
-        description: 'Target ABI for the build'
-        required: true
-        type: choice
-        options:
-          - arm64-v8a
-          - armeabi-v7a
-          - x86
-          - x86_64
-        default: 'arm64-v8a'
+      # `workflow_dispatch` has no native multi-select input, so each ABI is a
+      # checkbox (`type: boolean`). Check any combination of them.
+      abi_arm64_v8a:
+        description: 'Build arm64-v8a'
+        type: boolean
+        default: true
+      abi_armeabi_v7a:
+        description: 'Build armeabi-v7a'
+        type: boolean
+        default: false
+      abi_x86:
+        description: 'Build x86'
+        type: boolean
+        default: false
+      abi_x86_64:
+        description: 'Build x86_64'
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -68,29 +76,71 @@ jobs:
 
           echo "ECM_DIR=$ECM_DIR"
           
-      - name: Build Release APK
-        run: ./gradlew :app:assembleRelease -PbuildABI=${{ inputs.abi }}
+      - name: Resolve selected ABIs
+        id: abis
+        env:
+          ABI_ARM64_V8A: ${{ inputs.abi_arm64_v8a }}
+          ABI_ARMEABI_V7A: ${{ inputs.abi_armeabi_v7a }}
+          ABI_X86: ${{ inputs.abi_x86 }}
+          ABI_X86_64: ${{ inputs.abi_x86_64 }}
+        run: |
+          set -euo pipefail
+          list=""
+          if [ "$ABI_ARM64_V8A" = "true" ]; then list="$list,arm64-v8a"; fi
+          if [ "$ABI_ARMEABI_V7A" = "true" ]; then list="$list,armeabi-v7a"; fi
+          if [ "$ABI_X86" = "true" ]; then list="$list,x86"; fi
+          if [ "$ABI_X86_64" = "true" ]; then list="$list,x86_64"; fi
+          list="${list#,}"
+          if [ -z "$list" ]; then
+            echo "::error::No ABI selected. Tick at least one ABI checkbox."
+            exit 1
+          fi
+          echo "list=$list" >> "$GITHUB_OUTPUT"
+          echo "Selected ABIs: $list"
+
+      - name: Build Release APKs
+        run: ./gradlew :app:assembleRelease -PbuildABI=${{ steps.abis.outputs.list }}
         env:
           SIGN_KEY_BASE64: ${{ secrets.SIGNING_KEY }}
           SIGN_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
           SIGN_KEY_PWD: ${{ secrets.SIGNING_KEY_PASSWORD }}
           SIGN_STORE_PWD: ${{ secrets.SIGNING_STORE_PASSWORD }}
 
-      - name: Find and Rename APK
+      - name: Stage APKs as {abi}-release.apk
+        env:
+          ABIS: ${{ steps.abis.outputs.list }}
         run: |
-          APK_FILE=$(find app/build/outputs/apk/release/ -name "*.apk" | head -n 1)
-          if [ -n "$APK_FILE" ]; then
-            mv "$APK_FILE" app-release.apk
-          else
-            echo "No APK found"
-            false
-          fi
+          set -euo pipefail
+          shopt -s nullglob
+          src=app/build/outputs/apk/release
+          out=release-apks
+          mkdir -p "$out"
+          IFS=',' read -ra abi_list <<< "$ABIS"
+          for abi in "${abi_list[@]}"; do
+            case "$abi" in
+              armeabi-v7a) pattern='*armeabi-v7a*.apk' ;;
+              arm64-v8a)   pattern='*arm64-v8a*.apk' ;;
+              x86)         pattern='*x86-*.apk' ;;
+              x86_64)      pattern='*x86_64*.apk' ;;
+              *)
+                echo "::error::unknown ABI '$abi'"
+                exit 1
+                ;;
+            esac
+            matches=("$src"/$pattern)
+            if [ "${#matches[@]}" -ne 1 ]; then
+              echo "::error::expected exactly 1 APK for $abi, found ${#matches[@]}: ${matches[*]}"
+              exit 1
+            fi
+            cp -f "${matches[0]}" "$out/$abi-release.apk"
+          done
+          ls -l "$out"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.version }}
           name: ${{ inputs.version }}
-          files: app-release.apk
+          files: release-apks/*.apk
           draft: false
           prerelease: false
