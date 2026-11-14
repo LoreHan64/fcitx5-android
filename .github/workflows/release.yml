@@ -34,8 +34,12 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
+          # `git describe` (see ProjectExtensions.buildVersionName) needs tags and
+          # full history to produce v0.2.1-4-gXXXXXXX; a shallow clone falls back
+          # to a bare 7-character commit hash as the version name.
+          fetch-depth: 0
           submodules: recursive
 
       - name: Setup Java
